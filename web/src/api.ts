@@ -29,11 +29,17 @@ export const tenantStore = {
 export const api = axios.create({ baseURL: '/' })
 
 api.interceptors.request.use((cfg) => {
+  const h = cfg.headers as unknown as {
+    set?: (k: string, v: string) => void
+    [k: string]: unknown
+  }
   if (tenantStore.slug) {
-    cfg.headers['X-Tenant'] = tenantStore.slug
+    if (h.set) h.set('X-Tenant', tenantStore.slug)
+    else h['X-Tenant'] = tenantStore.slug
   }
   if (tenantStore.token) {
-    cfg.headers['Authorization'] = `Bearer ${tenantStore.token}`
+    if (h.set) h.set('Authorization', `Bearer ${tenantStore.token}`)
+    else h['Authorization'] = `Bearer ${tenantStore.token}`
   }
   return cfg
 })

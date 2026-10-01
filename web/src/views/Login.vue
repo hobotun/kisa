@@ -42,7 +42,7 @@ async function login() {
     })
     tenantStore.token = data.accessToken
     router.push('/requests')
-  } catch (e: unknown) {
+  } catch {
     // скелет бэка пока отвечает 501 — показываем честно
     error.value = 'Сервер вернул ошибку (скелет: auth еще не реализован)'
   } finally {
