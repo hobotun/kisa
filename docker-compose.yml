@@ -40,8 +40,17 @@ services:
     # kisa.example.com -> <host>:8081, wildcards *.kisa.example.com — для тенантов.
     ports:
       - "${BIND_ADDR:-127.0.0.1}:8081:80"
+    networks:
+      - default
+      - proxy
     depends_on:
       - server
 
 volumes:
   mongo-data:
+
+networks:
+  # Общая сеть с реверс-прокси (Caddy в стеке catalysm).
+  # Создать на хосте один раз: docker network create proxy
+  proxy:
+    external: true
