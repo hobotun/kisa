@@ -173,13 +173,12 @@ int main(int argc, char **argv) {
   QHttpServer server;
   registerRoutes(server);
 
-  QTcpServer tcp;
-  if (!tcp.listen(QHostAddress::Any, port)) {
-    qCritical("cannot listen on %hu", port);
+  const quint16 bound = server.listen(QHostAddress::Any, port);
+  if (bound == 0) {
+    qCritical("cannot listen on %u", static_cast<unsigned>(port));
     return 1;
   }
-  server.bind(&tcp);
-  qInfo("kisa-server on %hu (MONGO_URI %s)", port,
+  qInfo("kisa-server on %u (MONGO_URI %s)", static_cast<unsigned>(bound),
         qgetenv("MONGO_URI").isEmpty() ? "(storage TODO)" : "(storage TODO)");
   return app.exec();
 }
