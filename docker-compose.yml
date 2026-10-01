@@ -1,0 +1,47 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-kisa}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:-change-me}
+    volumes:
+      - mongo-data:/data/db
+    # Mongo наружу не публикуем: доступен только внутри сети стека.
+    # Для локальной отладки раскомментируй ports ниже.
+    # ports:
+    #   - "${BIND_ADDR:-127.0.0.1}:27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "-u", "${MONGO_ROOT_USER:-kisa}",
+             "-p", "${MONGO_ROOT_PASS:-change-me}", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://${MONGO_ROOT_USER:-kisa}:${MONGO_ROOT_PASS:-change-me}@mongo:27017/kisa?authSource=admin
+      PORT: "8080"
+    expose:
+      - "8080"
+    # Локально: http://localhost:8080. На хосте — за реверс-прокси, наружу не светим.
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:8080:8080"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    # Единственная точка входа: отдай ее в Nginx Proxy Manager / Traefik как
+    # kisa.example.com -> <host>:8081, wildcards *.kisa.example.com — для тенантов.
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:8081:80"
+    depends_on:
+      - server
+
+volumes:
+  mongo-data:

@@ -1,0 +1,13 @@
+# build
+build/
+dist/
+node_modules/
+*.o
+*.a
+
+# env с секретами — только .env.example в репо
+.env
+
+# IDE
+.vscode/
+.idea/
