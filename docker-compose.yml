@@ -41,8 +41,10 @@ services:
     ports:
       - "${BIND_ADDR:-127.0.0.1}:8081:80"
     networks:
-      - default
-      - proxy
+      default:
+      proxy:
+        aliases:
+          - kisa-web
     depends_on:
       - server
 
