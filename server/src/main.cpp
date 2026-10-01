@@ -36,7 +36,9 @@ QHttpServerResponse unauthorized(const QString &msg = "missing credentials") {
 // сверку с JWT-claim доделать вместе с auth (TODO).
 // Возвращает slug или пустую строку (тогда caller отвечает 400).
 QString resolveTenant(const QHttpServerRequest &req) {
-  const QString headerTenant = QString::fromUtf8(req.headers().value("X-Tenant"));
+  // Qt 6.4: значение заголовка — через QHttpServerRequest::value(),
+  // headers() там возвращает QList пар без .value().
+  const QString headerTenant = QString::fromUtf8(req.value("X-Tenant"));
   if (headerTenant.isEmpty())
     return {};
   // TODO: сравнить с поддоменом Host и claim access-токена (все три обязаны совпасть).
@@ -55,7 +57,7 @@ QHttpServerResponse requireTenant(const QHttpServerRequest &req, QString &tenant
 }
 
 bool hasAuthHeader(const QHttpServerRequest &req) {
-  return !req.headers().value("Authorization").isEmpty();
+  return !req.value("Authorization").isEmpty();
 }
 
 QHttpServerResponse notImplementedAuth(const QHttpServerRequest &req, const QString &what) {
