@@ -109,7 +109,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
               QJsonArray items;
               for (const auto &d :
                    app.db[coll].find(filter.extract(), opts))
-                items.append(docToJson(d.view()));
+                items.append(docToJson(d));
               return jsonResp({{"items", items}});
             } catch (...) {
               return errResp("internal", "list failed",
@@ -140,7 +140,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
               for (const char *f : {"fields", "states", "transitions", "numbering",
                                     "slaByPriority", "instruction"})
                 if (body.contains(f))
-                  d.append(kvp(f, jsonToBson(body.value(f))));
+                  d.append(kvp(std::string(f), jsonToBson(body.value(f))));
               d.append(kvp("createdBy", bsoncxx::oid{p->userId}));
               d.append(kvp("createdAt",
                            bsoncxx::types::b_date(Clock::now())));
@@ -148,7 +148,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
               auto got = app.db[coll].find_one(b::make_document(
                   kvp("_id", r->inserted_id().get_oid().value)));
               return jsonResp(docToJson(got->view()));
-            } catch (const mongocxx::exception &) {
+            } catch (const mongocxx::exception::exception &) {
               return errResp("conflict", "key already exists",
                              QHttpServerResponse::StatusCode::Conflict);
             } catch (...) {
@@ -173,7 +173,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
                        b::make_document(kvp("tenantId", bsoncxx::oid{p->tenantId}),
                                         kvp("key", key.toStdString())),
                        opts))
-                items.append(docToJson(d.view()));
+                items.append(docToJson(d));
               if (items.isEmpty())
                 return errResp("not_found", "no such template",
                                QHttpServerResponse::StatusCode::NotFound);
@@ -234,7 +234,7 @@ void registerMeta(QHttpServer &s, App &app) {
             QJsonArray items;
             for (const auto &d : app.db["roles"].find(b::make_document(
                      kvp("tenantId", bsoncxx::oid{p->tenantId}))))
-              items.append(docToJson(d.view()));
+              items.append(docToJson(d));
             return jsonResp({{"items", items}});
           });
   s.route("/api/v1/admin/branches", QHttpServerRequest::Method::Get,
@@ -246,7 +246,7 @@ void registerMeta(QHttpServer &s, App &app) {
             QJsonArray items;
             for (const auto &d : app.db["branches"].find(b::make_document(
                      kvp("tenantId", bsoncxx::oid{p->tenantId}))))
-              items.append(docToJson(d.view()));
+              items.append(docToJson(d));
             return jsonResp({{"items", items}});
           });
 }
