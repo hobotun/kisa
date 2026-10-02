@@ -54,8 +54,7 @@ QHttpServerResponse errResp(const QString &code, const QString &msg,
                             QHttpServerResponse::StatusCode http);
 QJsonObject reqJson(const QHttpServerRequest &req, bool &ok);
 
-// --- BSON <-> QJson (плоский конвертер достаточный для MVP) ---
-QJsonValue bsonToJson(const bsoncxx::types::bson_value::view &v);
+// --- BSON -> QJson через Extended JSON (версионно-независимо) ---
 QJsonObject docToJson(const bsoncxx::document::view &d);
 
 // --- crypto ---

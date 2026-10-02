@@ -148,7 +148,8 @@ void registerAuth(QHttpServer &s, App &app) {
                 return errResp("bad_token", "unknown refresh token",
                                QHttpServerResponse::StatusCode::Unauthorized);
               const auto sv = sess->view();
-              if (sv["refreshExp"].get_date().value < Clock::now())
+              if (kisa::Clock::time_point(sv["refreshExp"].get_date().value) <
+                  kisa::Clock::now())
                 return errResp("expired", "refresh token expired",
                                QHttpServerResponse::StatusCode::Unauthorized);
               const bsoncxx::oid tid = sv["tenantId"].get_oid().value;

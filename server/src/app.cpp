@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRandomGenerator>
 
 #include <argon2.h>
 
@@ -39,50 +40,29 @@ QJsonObject reqJson(const QHttpServerRequest &req, bool &ok) {
 }
 
 // ---------- BSON ----------
-QJsonValue bsonToJson(const bsoncxx::types::bson_value::view &v) {
-  using namespace bsoncxx::types;
-  switch (v.type()) {
-  case type::k_utf8:
-    return QString::fromUtf8(v.get_string().value.data(),
-                             (int)v.get_string().value.size());
-  case type::k_int32: return v.get_int32().value;
-  case type::k_int64: return QString::number(v.get_int64().value);
-  case type::k_double: return v.get_double().value;
-  case type::k_bool: return v.get_bool().value;
-  case type::k_null: return QJsonValue::Null;
-  case type::k_oid: return QString::fromStdString(v.get_oid().value.to_string());
-  case type::k_date:
-    return QString::fromStdString(
-        bsoncxx::to_json(v)); // "{"$date":...}" — компактно для MVP
-  case type::k_array: {
-    QJsonArray a;
-    for (const auto &e : v.get_array().value)
-      a.append(bsonToJson(e.get_value()));
-    return a;
-  }
-  case type::k_document: {
-    QJsonObject o;
-    for (const auto &e : v.get_document().value)
-      o.insert(QString::fromStdString(std::string(e.key())),
-               bsonToJson(e.get_value()));
-    return o;
-  }
-  default:
-    return QString::fromStdString(bsoncxx::to_json(v));
-  }
-}
+// Через bsoncxx::to_json (Extended JSON) + QJsonDocument: не зависит от
+// имен enum/struct конкретной версии драйвера.
+// {"_id":{"$oid":"hex"}} схлопываем в {"_id":"hex"} для клиентов.
+#include <bsoncxx/json.hpp>
 
 QJsonObject docToJson(const bsoncxx::document::view &d) {
-  QJsonObject o;
-  for (const auto &e : d) {
-    const std::string k(e.key());
-    if (k == "_id" && e.type() == bsoncxx::types::type::k_oid) {
-      o.insert("_id", QString::fromStdString(e.get_oid().value.to_string()));
-    } else {
-      o.insert(QString::fromStdString(k), bsonToJson(e.get_value()));
-    }
+  const QByteArray raw = QByteArray::fromStdString(bsoncxx::to_json(d));
+  QJsonParseError err{};
+  const QJsonDocument doc = QJsonDocument::fromJson(raw, &err);
+  if (err.error != QJsonParseError::NoError || !doc.isObject())
+    return {};
+  QJsonObject o = doc.object();
+  if (o.contains("_id") && o.value("_id").isObject()) {
+    const QJsonObject id = o.value("_id").toObject();
+    if (id.contains("$oid"))
+      o["_id"] = id.value("$oid").toString();
   }
   return o;
+}
+
+// b_date хранит миллисекунды с эпохи — сравниваем через time_point.
+static bool bdateExpired(const bsoncxx::types::b_date &d) {
+  return Clock::time_point(d.value) < Clock::now();
 }
 
 // ---------- crypto ----------
@@ -95,7 +75,7 @@ std::string randHex(std::size_t bytes) {
     // запасной путь (в контейнере практически недостижим)
     raw.resize((int)bytes);
     for (int i = 0; i < (int)bytes; ++i)
-      raw[i] = (char)(qrand() & 0xFF);
+      raw[i] = (char)(QRandomGenerator::global()->generate() & 0xFF);
   }
   return raw.toHex().toStdString();
 }
@@ -222,7 +202,7 @@ std::optional<Principal> principalFor(App &app, const QHttpServerRequest &req) {
       return std::nullopt;
     const auto sv = s->view();
     const auto accessExp = sv["accessExp"].get_date().value;
-    if (accessExp < Clock::now())
+    if (Clock::time_point(accessExp) < Clock::now())
       return std::nullopt;
     const std::string tid = sv["tenantId"].get_oid().value.to_string();
     const std::string uid = sv["userId"].get_oid().value.to_string();
