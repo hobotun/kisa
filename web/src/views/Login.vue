@@ -41,10 +41,13 @@ async function login() {
       device: navigator.userAgent.slice(0, 120),
     })
     tenantStore.token = data.accessToken
+    tenantStore.refresh = data.refreshToken
     router.push('/requests')
-  } catch {
-    // скелет бэка пока отвечает 501 — показываем честно
-    error.value = 'Сервер вернул ошибку (скелет: auth еще не реализован)'
+  } catch (e: unknown) {
+    const msg =
+      (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data
+        ?.error?.message || 'Сервер вернул ошибку'
+    error.value = msg
   } finally {
     loading.value = false
   }

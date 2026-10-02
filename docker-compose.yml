@@ -24,6 +24,9 @@ services:
     environment:
       MONGO_URI: mongodb://${MONGO_ROOT_USER:-kisa}:${MONGO_ROOT_PASS:-change-me}@mongo:27017/kisa?authSource=admin
       PORT: "8080"
+      SEED_TENANT_SLUG: ${SEED_TENANT_SLUG:-demo}
+      SEED_ADMIN_LOGIN: ${SEED_ADMIN_LOGIN:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
     expose:
       - "8080"
     # Локально: http://localhost:8080. На хосте — за реверс-прокси, наружу не светим.
