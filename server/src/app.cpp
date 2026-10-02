@@ -13,6 +13,7 @@
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/kvp.hpp>
 #include <bsoncxx/exception/exception.hpp>
+#include <bsoncxx/json.hpp>
 #include <bsoncxx/oid.hpp>
 #include <bsoncxx/types.hpp>
 #include <mongocxx/options/index.hpp>
@@ -43,8 +44,6 @@ QJsonObject reqJson(const QHttpServerRequest &req, bool &ok) {
 // Через bsoncxx::to_json (Extended JSON) + QJsonDocument: не зависит от
 // имен enum/struct конкретной версии драйвера.
 // {"_id":{"$oid":"hex"}} схлопываем в {"_id":"hex"} для клиентов.
-#include <bsoncxx/json.hpp>
-
 QJsonObject docToJson(const bsoncxx::document::view &d) {
   const QByteArray raw = QByteArray::fromStdString(bsoncxx::to_json(d));
   QJsonParseError err{};
