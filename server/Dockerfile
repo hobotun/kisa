@@ -27,6 +27,7 @@ RUN curl -fsSL -o /tmp/mongo-cxx.tar.gz \
  && tar -xzf /tmp/mongo-cxx.tar.gz -C /tmp \
  && cmake -S /tmp/mongo-cxx-driver-r${MONGO_CXX_VERSION} -B /tmp/mongo-cxx-build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_STANDARD=17 \
+      -DMONGOCXX_OVERRIDE_DEFAULT_INSTALL_PREFIX=OFF \
       -DBUILD_TESTING=OFF -DENABLE_EXAMPLES=OFF \
  && cmake --build /tmp/mongo-cxx-build && cmake --install /tmp/mongo-cxx-build \
  && rm -rf /tmp/mongo-cxx.tar.gz /tmp/mongo-cxx-driver-r${MONGO_CXX_VERSION} /tmp/mongo-cxx-build \
