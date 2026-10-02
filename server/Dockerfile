@@ -2,7 +2,7 @@
 FROM ubuntu:24.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential cmake ninja-build pkg-config curl ca-certificates \
+      build-essential cmake ninja-build pkg-config curl ca-certificates git \
       qt6-base-dev qt6-httpserver-dev qt6-websockets-dev \
       libssl-dev libargon2-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -26,7 +26,7 @@ RUN curl -fsSL -o /tmp/mongo-cxx.tar.gz \
       https://github.com/mongodb/mongo-cxx-driver/releases/download/r${MONGO_CXX_VERSION}/mongo-cxx-driver-r${MONGO_CXX_VERSION}.tar.gz \
  && tar -xzf /tmp/mongo-cxx.tar.gz -C /tmp \
  && cmake -S /tmp/mongo-cxx-driver-r${MONGO_CXX_VERSION} -B /tmp/mongo-cxx-build -G Ninja \
-      -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
+      -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_STANDARD=17 \
       -DBUILD_TESTING=OFF -DENABLE_EXAMPLES=OFF \
  && cmake --build /tmp/mongo-cxx-build && cmake --install /tmp/mongo-cxx-build \
  && rm -rf /tmp/mongo-cxx.tar.gz /tmp/mongo-cxx-driver-r${MONGO_CXX_VERSION} /tmp/mongo-cxx-build \
