@@ -148,7 +148,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
               auto got = app.db[coll].find_one(b::make_document(
                   kvp("_id", r->inserted_id().get_oid().value)));
               return jsonResp(docToJson(got->view()));
-            } catch (const mongocxx::operation_exception &e) {
+            } catch (const std::exception &e) {
               const std::string w = e.what();
               if (w.find("E11000") != std::string::npos ||
                   w.find("duplicate key") != std::string::npos)
