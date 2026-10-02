@@ -13,7 +13,8 @@ services:
     #   - "${BIND_ADDR:-127.0.0.1}:27017:27017"
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "-u", "${MONGO_ROOT_USER:-kisa}",
-             "-p", "${MONGO_ROOT_PASS:-change-me}", "--eval", "db.adminCommand('ping')"]
+             "-p", "${MONGO_ROOT_PASS:-change-me}", "--authenticationDatabase", "admin",
+             "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
