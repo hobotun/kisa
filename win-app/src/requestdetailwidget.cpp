@@ -1,4 +1,5 @@
 #include "requestdetailwidget.hpp"
+#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QPushButton>
