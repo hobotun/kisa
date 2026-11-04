@@ -1,17 +1,11 @@
 #pragma once
 #include <QHttpServer>
+#include <mongocxx/database.hpp>
 #include "app.hpp"
 
 namespace kisa {
-// Движок заявок + документы-минимум + гости.
-// Переходы только через transitions-эндпоинт, кнопки клиенты рисуют
-// из allowedActions. Гварды, proxy/guest, reopen-лимит — из шаблона.
 void registerEngine(QHttpServer &s, App &app);
-// Сид workflow_templates:service_request v1 (published) + базовые роли.
-// Вызывается из App::seed для свежего тенанта.
-void seedServiceRequest(App &app, const bsoncxx::oid &tenantId);
-// Идемпотентные дефолты для любого тенанта (роли + шаблон). Вызывается
-// из App::seed для ВСЕХ тенантов при старте — так существующий demo
-// получит шаблон без пересоздания базы.
-void ensureTenantDefaults(App &app, const bsoncxx::oid &tenantId);
+// seedServiceRequest и ensureTenantDefaults принимают db (уже приобретённый из pool).
+void seedServiceRequest(mongocxx::database &db, const bsoncxx::oid &tenantId);
+void ensureTenantDefaults(mongocxx::database &db, const bsoncxx::oid &tenantId);
 } // namespace kisa
