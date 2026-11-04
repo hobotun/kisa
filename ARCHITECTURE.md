@@ -514,6 +514,83 @@ GitHub Actions (`.github/workflows/`): на каждый push в `main` — сб
 
 ---
 
+## Настройка рабочего места (новая машина)
+
+### 1. Клонировать репозиторий
+
+```bash
+git clone git@github.com:hobotun/kisa.git
+```
+
+### 2. Win-app (Qt Widgets)
+
+Установить:
+- **Qt 6.12.0** (MinGW 64-bit) — Qt Online Installer → `C:/Qt/6.12.0/`
+- **MinGW64** — `C:/dev/mingw64/` (или взять из комплекта Qt)
+- **CMake ≥ 3.21** — добавить в PATH
+
+Создать `win-app/CMakeUserPresets.json` вручную (файл в `.gitignore`, машиноспецифичный):
+
+```json
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "win-debug",
+      "inherits": "windows-mingw-debug",
+      "cacheVariables": {
+        "Qt6_DIR": "C:/Qt/6.12.0/mingw_64/lib/cmake/Qt6",
+        "CMAKE_MAKE_PROGRAM": "C:/Qt/Tools/Ninja/ninja.exe"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "win-debug", "configurePreset": "win-debug" }
+  ]
+}
+```
+
+Собрать:
+
+```bash
+cd win-app
+cmake --preset win-debug
+cmake --build --preset win-debug
+```
+
+Скопировать Qt DLL рядом с `.exe` (нужно один раз):
+
+```bash
+C:\Qt\6.12.0\mingw_64\bin\windeployqt.exe build\win-debug\kisa-win.exe
+```
+
+### 3. Сервер (Docker)
+
+```bash
+# в корне проекта
+docker compose up -d
+```
+
+Переменные окружения (передать через `.env` или `docker-compose.override.yml`):
+
+| Переменная | Пример |
+|-----------|--------|
+| `MONGO_URI` | `mongodb://mongo:27017` |
+| `PORT` | `8080` |
+| `SEED_TENANT_SLUG` | `demo` |
+| `SEED_ADMIN_LOGIN` | `admin` |
+| `SEED_ADMIN_PASSWORD` | `changeme` |
+
+### 4. Веб (Vue 3)
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+---
+
 ## Что не реализовано (TODO)
 
 - Кнопка «Новая заявка» в win-app (RequestsWidget)
