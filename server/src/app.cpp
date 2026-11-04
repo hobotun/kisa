@@ -107,7 +107,7 @@ App::App(const std::string &mongoUri)
 
 void App::ensureIndexes() {
     auto entry = acquire();
-    auto db = (*entry)["kisa"];
+    auto db = (*entry)[std::string("kisa")];
 
     using mongocxx::options::index;
     auto tenants = db["tenants"];
@@ -134,7 +134,7 @@ void App::ensureIndexes() {
 
 void App::seed() {
     auto entry = acquire();
-    auto db = (*entry)["kisa"];
+    auto db = (*entry)[std::string("kisa")];
 
     auto tenants = db["tenants"];
     if (tenants.count_documents({}) == 0) {
@@ -210,17 +210,19 @@ std::optional<Principal> principalFor(mongocxx::database &db,
         const auto sv = s->view();
         if (Clock::time_point(sv["accessExp"].get_date().value) < Clock::now())
             return std::nullopt;
-        const std::string tid = sv["tenantId"].get_oid().value.to_string();
-        const std::string uid = sv["userId"].get_oid().value.to_string();
-        if (tid != tenantIdFor(db, req))
+        const bsoncxx::oid tidOid = sv["tenantId"].get_oid().value;
+        const bsoncxx::oid uidOid = sv["userId"].get_oid().value;
+        if (tidOid.to_string() != tenantIdFor(db, req))
             return std::nullopt;
         auto u = db["users"].find_one(
-            b::make_document(kvp("_id", bsoncxx::oid{uid})));
+            b::make_document(kvp("_id", uidOid)));
         if (!u || std::string(u->view()["status"].get_string().value) != "active")
             return std::nullopt;
         Principal p;
-        p.tenantId = tid;
-        p.userId   = uid;
+        p.tenantOid = tidOid;
+        p.userOid   = uidOid;
+        p.tenantId  = tidOid.to_string();
+        p.userId    = uidOid.to_string();
         const auto uv = u->view();
         p.login = std::string(uv["login"].get_string().value);
         p.name  = uv["name"] ? std::string(uv["name"].get_string().value) : p.login;

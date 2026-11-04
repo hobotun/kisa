@@ -1,5 +1,7 @@
 #include "engine.hpp"
 
+#include <cstdio>
+
 #include <QJsonArray>
 #include <QUrlQuery>
 
@@ -41,8 +43,22 @@ bsoncxx::types::bson_value::value j2b(const QJsonValue &v) {
 }
 
 bool parseOid(const QString &s, bsoncxx::oid &out) {
-    try { out = bsoncxx::oid{s.toStdString()}; return true; }
-    catch (...) { return false; }
+    // oid(string_view) constructor may not exist in all bsoncxx versions;
+    // decode hex → raw bytes and use oid(const char*, size_t).
+    const std::string hex = s.toStdString();
+    if (hex.size() != 24) return false;
+    try {
+        char bytes[12];
+        for (int i = 0; i < 12; ++i) {
+            unsigned int b = 0;
+            if (std::sscanf(hex.c_str() + i * 2, "%02x", &b) != 1) return false;
+            bytes[i] = static_cast<char>(b);
+        }
+        out = bsoncxx::oid(bytes, 12);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 std::optional<bsoncxx::document::value> loadFlow(mongocxx::database &db,
@@ -69,7 +85,8 @@ std::string strField(const bsoncxx::document::view &d, const char *k,
 
 struct Actor {
     QString type; // user | guest
-    std::string userId;
+    bsoncxx::oid userOid;   // for DB inserts
+    std::string userId;     // hex string, for SOD string comparison
     std::string label;
     std::vector<std::string> roles;
     std::vector<std::string> guestScope;
@@ -307,7 +324,7 @@ ApplyResult applyTransition(mongocxx::database &db,
         actorDoc.append(kvp("type",  actor.type.toStdString()));
         actorDoc.append(kvp("label", actor.label));
         if (actor.type == "user")
-            actorDoc.append(kvp("userId", bsoncxx::oid{actor.userId}));
+            actorDoc.append(kvp("userId", actor.userOid));
         ev.append(kvp("actor", actorDoc.extract()));
         ev.append(kvp("from", cur));
         ev.append(kvp("to",   to));
@@ -347,7 +364,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/workflows", QHttpServerRequest::Method::Get,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -356,7 +373,7 @@ void registerEngine(QHttpServer &s, App &app) {
                     return errResp("bad_request", "?kind= required",
                                    QHttpServerResponse::StatusCode::BadRequest);
                 try {
-                    auto t = loadFlow(db, bsoncxx::oid{p->tenantId}, kind.toStdString());
+                    auto t = loadFlow(db, p->tenantOid, kind.toStdString());
                     if (!t)
                         return errResp("not_found", "no published template",
                                        QHttpServerResponse::StatusCode::NotFound);
@@ -370,7 +387,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/requests", QHttpServerRequest::Method::Post,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -421,7 +438,7 @@ void registerEngine(QHttpServer &s, App &app) {
                         kvp("tenantId", tid), kvp("templateKey", tkey),
                         kvp("templateVersion", tv["version"].get_int32().value),
                         kvp("state", initial), kvp("fields", j2b(fields)),
-                        kvp("requesterId", bsoncxx::oid{p->userId}),
+                        kvp("requesterId", p->userOid),
                         kvp("assigneeIds", b::make_array()),
                         kvp("approvalMode", "proxy"),
                         kvp("priority", prio.toStdString()),
@@ -429,13 +446,13 @@ void registerEngine(QHttpServer &s, App &app) {
                         kvp("counterpartyId", body.value("counterpartyId").toString().toStdString()),
                         kvp("dueAt", bsoncxx::types::b_date(due)),
                         kvp("reopenCount", (int32_t)0),
-                        kvp("createdBy", bsoncxx::oid{p->userId}),
+                        kvp("createdBy", p->userOid),
                         kvp("createdAt", bsoncxx::types::b_date(now)),
                         kvp("updatedAt", bsoncxx::types::b_date(now))));
                     auto got = db["requests"].find_one(b::make_document(
                         kvp("_id", ins->inserted_id().get_oid().value)));
                     Actor actor;
-                    actor.type = "user"; actor.userId = p->userId;
+                    actor.type = "user"; actor.userOid = p->userOid; actor.userId = p->userId;
                     actor.label = p->login; actor.roles = p->roles;
                     auto applied = applyTransition(db, tv, got->view(), "submit", {}, {}, actor);
                     auto cur2 = db["requests"].find_one(b::make_document(
@@ -451,7 +468,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/requests", QHttpServerRequest::Method::Get,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -504,7 +521,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/requests/<arg>", QHttpServerRequest::Method::Get,
             [&app](const QString &id, const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -514,7 +531,7 @@ void registerEngine(QHttpServer &s, App &app) {
                         return errResp("bad_request", "bad id",
                                        QHttpServerResponse::StatusCode::BadRequest);
                     auto got = db["requests"].find_one(b::make_document(
-                        kvp("_id", rid), kvp("tenantId", bsoncxx::oid{p->tenantId})));
+                        kvp("_id", rid), kvp("tenantId", p->tenantOid)));
                     if (!got)
                         return errResp("not_found", "no such request",
                                        QHttpServerResponse::StatusCode::NotFound);
@@ -536,12 +553,12 @@ void registerEngine(QHttpServer &s, App &app) {
                     if (!vis)
                         return errResp("forbidden", "not your request",
                                        QHttpServerResponse::StatusCode::Forbidden);
-                    auto tmpl = loadFlow(db, bsoncxx::oid{p->tenantId},
+                    auto tmpl = loadFlow(db, p->tenantOid,
                                          strField(rv, "templateKey"));
                     QJsonObject resp = docToJson(rv);
                     if (tmpl) {
                         Actor actor;
-                        actor.type = "user"; actor.userId = p->userId;
+                        actor.type = "user"; actor.userOid = p->userOid; actor.userId = p->userId;
                         actor.label = p->login; actor.roles = p->roles;
                         resp.insert("allowedActions",
                                     allowedActions(tmpl->view(), strField(rv, "state"), actor));
@@ -566,7 +583,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/requests/<arg>/transitions", QHttpServerRequest::Method::Post,
             [&app](const QString &id, const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -581,17 +598,17 @@ void registerEngine(QHttpServer &s, App &app) {
                         return errResp("bad_request", "bad id",
                                        QHttpServerResponse::StatusCode::BadRequest);
                     auto got = db["requests"].find_one(b::make_document(
-                        kvp("_id", rid), kvp("tenantId", bsoncxx::oid{p->tenantId})));
+                        kvp("_id", rid), kvp("tenantId", p->tenantOid)));
                     if (!got)
                         return errResp("not_found", "no such request",
                                        QHttpServerResponse::StatusCode::NotFound);
-                    auto tmpl = loadFlow(db, bsoncxx::oid{p->tenantId},
+                    auto tmpl = loadFlow(db, p->tenantOid,
                                          strField(got->view(), "templateKey"));
                     if (!tmpl)
                         return errResp("internal", "template missing",
                                        QHttpServerResponse::StatusCode::InternalServerError);
                     Actor actor;
-                    actor.type = "user"; actor.userId = p->userId;
+                    actor.type = "user"; actor.userOid = p->userOid; actor.userId = p->userId;
                     actor.label = p->login; actor.roles = p->roles;
                     actor.onBehalfOf = body.value("onBehalfOf").toString().toStdString();
                     auto r = applyTransition(db, tmpl->view(), got->view(),
@@ -613,7 +630,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/requests/<arg>/mode", QHttpServerRequest::Method::Post,
             [&app](const QString &id, const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -674,7 +691,7 @@ void registerEngine(QHttpServer &s, App &app) {
                                 sha256Hex(QByteArray::fromStdString(token)).toLatin1().constData())),
                             kvp("expiresAt", bsoncxx::types::b_date(now + std::chrono::hours(ttlH))),
                             kvp("usedActions", b::make_array()),
-                            kvp("createdBy", bsoncxx::oid{p->userId}),
+                            kvp("createdBy", p->userOid),
                             kvp("createdAt", bsoncxx::types::b_date(now))));
                         resp.insert("token", QString::fromStdString(token));
                         resp.insert("link", QString("/g/%1").arg(QString::fromStdString(token)));
@@ -689,7 +706,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/requests/<arg>/comments", QHttpServerRequest::Method::Post,
             [&app](const QString &id, const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -705,14 +722,14 @@ void registerEngine(QHttpServer &s, App &app) {
                         return errResp("bad_request", "bad id",
                                        QHttpServerResponse::StatusCode::BadRequest);
                     auto got = db["requests"].find_one(b::make_document(
-                        kvp("_id", rid), kvp("tenantId", bsoncxx::oid{p->tenantId})));
+                        kvp("_id", rid), kvp("tenantId", p->tenantOid)));
                     if (!got)
                         return errResp("not_found", "no such request",
                                        QHttpServerResponse::StatusCode::NotFound);
                     auto ins = db["request_comments"].insert_one(b::make_document(
-                        kvp("tenantId", bsoncxx::oid{p->tenantId}),
+                        kvp("tenantId", p->tenantOid),
                         kvp("requestId", rid),
-                        kvp("authorId",  bsoncxx::oid{p->userId}),
+                        kvp("authorId",  p->userOid),
                         kvp("authorType", "user"), kvp("authorLabel", p->login),
                         kvp("text", text.toStdString()),
                         kvp("createdAt", bsoncxx::types::b_date(Clock::now()))));
@@ -730,7 +747,7 @@ void registerEngine(QHttpServer &s, App &app) {
         -> std::optional<bsoncxx::document::value> {
         try {
             auto entry = app.acquire();
-            auto db = (*entry)["kisa"];
+            auto db = (*entry)[std::string("kisa")];
             const QString h = sha256Hex(token.toUtf8());
             auto t = db["guest_tokens"].find_one(b::make_document(
                 kvp("tokenHash", std::string(h.toLatin1().constData()))));
@@ -751,7 +768,7 @@ void registerEngine(QHttpServer &s, App &app) {
                                    QHttpServerResponse::StatusCode::NotFound);
                 try {
                     auto entry = app.acquire();
-                    auto db = (*entry)["kisa"];
+                    auto db = (*entry)[std::string("kisa")];
                     const auto tv = t->view();
                     const bsoncxx::oid tid = tv["tenantId"].get_oid().value;
                     const bsoncxx::oid rid = tv["requestId"].get_oid().value;
@@ -810,7 +827,7 @@ void registerEngine(QHttpServer &s, App &app) {
                                    QHttpServerResponse::StatusCode::BadRequest);
                 try {
                     auto entry = app.acquire();
-                    auto db = (*entry)["kisa"];
+                    auto db = (*entry)[std::string("kisa")];
                     const auto tv = t->view();
                     const bsoncxx::oid tid = tv["tenantId"].get_oid().value;
                     const bsoncxx::oid rid = tv["requestId"].get_oid().value;
@@ -855,7 +872,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/documents", QHttpServerRequest::Method::Post,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -915,7 +932,7 @@ void registerEngine(QHttpServer &s, App &app) {
                         kvp("number", tkey + "-" + period + "-" + std::to_string(seq)),
                         kvp("fields", j2b(fields)),
                         kvp("branchId", body.value("branchId").toString().toStdString()),
-                        kvp("status", "active"), kvp("createdBy", bsoncxx::oid{p->userId}),
+                        kvp("status", "active"), kvp("createdBy", p->userOid),
                         kvp("createdAt", bsoncxx::types::b_date(now)),
                         kvp("updatedAt", bsoncxx::types::b_date(now))));
                     auto got = db["documents"].find_one(b::make_document(
@@ -930,13 +947,13 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/documents", QHttpServerRequest::Method::Get,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
                 try {
                     b::document filter;
-                    filter.append(kvp("tenantId", bsoncxx::oid{p->tenantId}));
+                    filter.append(kvp("tenantId", p->tenantOid));
                     const QUrlQuery q(req.url());
                     if (!q.queryItemValue("templateKey").isEmpty())
                         filter.append(kvp("templateKey",
@@ -957,7 +974,7 @@ void registerEngine(QHttpServer &s, App &app) {
     s.route("/api/v1/documents/<arg>", QHttpServerRequest::Method::Get,
             [&app](const QString &id, const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
@@ -967,7 +984,7 @@ void registerEngine(QHttpServer &s, App &app) {
                         return errResp("bad_request", "bad id",
                                        QHttpServerResponse::StatusCode::BadRequest);
                     auto got = db["documents"].find_one(b::make_document(
-                        kvp("_id", did), kvp("tenantId", bsoncxx::oid{p->tenantId})));
+                        kvp("_id", did), kvp("tenantId", p->tenantOid)));
                     if (!got)
                         return errResp("not_found", "no such document",
                                        QHttpServerResponse::StatusCode::NotFound);

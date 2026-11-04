@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <bsoncxx/oid.hpp>
 #include <mongocxx/database.hpp>
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
@@ -25,8 +26,10 @@ inline constexpr auto ACCESS_TTL  = std::chrono::minutes(15);
 inline constexpr auto REFRESH_TTL = std::chrono::hours(24 * 30);
 
 struct Principal {
-    std::string tenantId; // hex ObjectId
-    std::string userId;   // hex ObjectId
+    bsoncxx::oid tenantOid;
+    bsoncxx::oid userOid;
+    std::string tenantId; // hex, для JSON-ответов
+    std::string userId;   // hex, для JSON-ответов
     std::string login;
     std::string name;
     std::vector<std::string> roles;

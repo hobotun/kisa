@@ -25,9 +25,11 @@ QJsonObject issueSession(mongocxx::database &db, const bsoncxx::oid &tid,
         kvp("refreshExp",  bsoncxx::types::b_date(now + REFRESH_TTL)),
         kvp("device",      std::string(device.toUtf8().constData())),
         kvp("createdAt",   bsoncxx::types::b_date(now))));
-    return {{"accessToken",  QString::fromStdString(access)},
-            {"refreshToken", QString::fromStdString(refresh)},
-            {"expiresIn", (int)std::chrono::duration_cast<std::chrono::seconds>(ACCESS_TTL).count()}};
+    QJsonObject resp;
+    resp["accessToken"]  = QString::fromStdString(access);
+    resp["refreshToken"] = QString::fromStdString(refresh);
+    resp["expiresIn"]    = (int)std::chrono::duration_cast<std::chrono::seconds>(ACCESS_TTL).count();
+    return resp;
 }
 
 bool loginLocked(App &app, const std::string &key) {
@@ -59,18 +61,23 @@ void registerAuth(QHttpServer &s, App &app) {
     s.route("/api/v1/auth/resolve", QHttpServerRequest::Method::Post,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
-                const std::string tid = tenantIdFor(db, req);
-                if (tid.empty())
+                auto db = (*entry)[std::string("kisa")];
+                const QByteArray slug = req.value("X-Tenant");
+                if (slug.isEmpty())
                     return errResp("unknown_tenant", "tenant not found",
                                    QHttpServerResponse::StatusCode::NotFound);
                 try {
-                    auto t = db["tenants"].find_one(
-                        b::make_document(kvp("_id", bsoncxx::oid{tid})));
+                    auto t = db["tenants"].find_one(b::make_document(
+                        kvp("slug", std::string(slug.constData()))));
+                    if (!t)
+                        return errResp("unknown_tenant", "tenant not found",
+                                       QHttpServerResponse::StatusCode::NotFound);
                     const auto tv = t->view();
-                    return jsonResp({{"slug", QString::fromUtf8(req.value("X-Tenant"))},
-                                     {"name", QString::fromStdString(
-                                          std::string(tv["name"].get_string().value))}});
+                    QJsonObject resp;
+                    resp["slug"] = QString::fromUtf8(slug);
+                    resp["name"] = QString::fromStdString(
+                        std::string(tv["name"].get_string().value));
+                    return jsonResp(resp);
                 } catch (...) {
                     return errResp("unknown_tenant", "tenant not found",
                                    QHttpServerResponse::StatusCode::NotFound);
@@ -80,11 +87,24 @@ void registerAuth(QHttpServer &s, App &app) {
     s.route("/api/v1/auth/login", QHttpServerRequest::Method::Post,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
-                const std::string tid = tenantIdFor(db, req);
-                if (tid.empty())
+                auto db = (*entry)[std::string("kisa")];
+                const QByteArray slug = req.value("X-Tenant");
+                if (slug.isEmpty())
                     return errResp("unknown_tenant", "tenant not found",
                                    QHttpServerResponse::StatusCode::NotFound);
+                std::optional<bsoncxx::oid> tidOpt;
+                try {
+                    auto tDoc = db["tenants"].find_one(b::make_document(
+                        kvp("slug", std::string(slug.constData()))));
+                    if (!tDoc)
+                        return errResp("unknown_tenant", "tenant not found",
+                                       QHttpServerResponse::StatusCode::NotFound);
+                    tidOpt = tDoc->view()["_id"].get_oid().value;
+                } catch (...) {
+                    return errResp("unknown_tenant", "tenant not found",
+                                   QHttpServerResponse::StatusCode::NotFound);
+                }
+                const bsoncxx::oid &tid = *tidOpt;
                 bool ok = false;
                 const QJsonObject body = reqJson(req, ok);
                 if (!ok)
@@ -96,13 +116,13 @@ void registerAuth(QHttpServer &s, App &app) {
                 if (login.isEmpty() || password.isEmpty())
                     return errResp("bad_request", "login+password required",
                                    QHttpServerResponse::StatusCode::BadRequest);
-                const std::string lkey = tid + "/" + login.toStdString();
+                const std::string lkey = tid.to_string() + "/" + login.toStdString();
                 if (loginLocked(app, lkey))
                     return errResp("locked", "too many attempts, try later",
                                    QHttpServerResponse::StatusCode::TooManyRequests);
                 try {
                     auto u = db["users"].find_one(b::make_document(
-                        kvp("tenantId", bsoncxx::oid{tid}),
+                        kvp("tenantId", tid),
                         kvp("login", login.toStdString())));
                     bool good = false;
                     if (u) {
@@ -118,15 +138,17 @@ void registerAuth(QHttpServer &s, App &app) {
                     }
                     loginOk(app, lkey);
                     const auto uv = u->view();
-                    QJsonObject resp = issueSession(db, bsoncxx::oid{tid},
+                    QJsonObject resp = issueSession(db, tid,
                                                     uv["_id"].get_oid().value, device);
                     QJsonArray roles;
                     for (const auto &r : uv["roles"].get_array().value)
                         roles.append(QString::fromStdString(std::string(r.get_string().value)));
-                    resp.insert("user", QJsonObject{
-                        {"login", login},
-                        {"name", QString::fromStdString(std::string(uv["name"].get_string().value))},
-                        {"roles", roles}});
+                    QJsonObject userObj;
+                    userObj["login"] = login;
+                    userObj["name"]  = QString::fromStdString(
+                        std::string(uv["name"].get_string().value));
+                    userObj["roles"] = roles;
+                    resp.insert("user", userObj);
                     return jsonResp(resp);
                 } catch (...) {
                     return errResp("internal", "login failed",
@@ -144,7 +166,7 @@ void registerAuth(QHttpServer &s, App &app) {
                 const QString rh = sha256Hex(body.value("refreshToken").toString().toUtf8());
                 try {
                     auto entry = app.acquire();
-                    auto db = (*entry)["kisa"];
+                    auto db = (*entry)[std::string("kisa")];
                     auto sess = db["sessions"].find_one(b::make_document(
                         kvp("refreshHash", std::string(rh.toLatin1().constData()))));
                     if (!sess)
@@ -172,18 +194,20 @@ void registerAuth(QHttpServer &s, App &app) {
                     const QString ah = sha256Hex(auth.mid(7));
                     try {
                         auto entry = app.acquire();
-                        auto db = (*entry)["kisa"];
+                        auto db = (*entry)[std::string("kisa")];
                         db["sessions"].delete_one(b::make_document(
                             kvp("accessHash", std::string(ah.toLatin1().constData()))));
                     } catch (...) {}
                 }
-                return jsonResp({{"ok", true}});
+                QJsonObject resp;
+                resp["ok"] = true;
+                return jsonResp(resp);
             });
 
     s.route("/api/v1/me", QHttpServerRequest::Method::Get,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 auto p = principalFor(db, req);
                 if (!p)
                     return errResp("unauthorized", "invalid or expired token",
@@ -191,10 +215,12 @@ void registerAuth(QHttpServer &s, App &app) {
                 QJsonArray roles;
                 for (const auto &r : p->roles)
                     roles.append(QString::fromStdString(r));
-                return jsonResp({{"login",    QString::fromStdString(p->login)},
-                                 {"name",     QString::fromStdString(p->name)},
-                                 {"roles",    roles},
-                                 {"tenantId", QString::fromStdString(p->tenantId)}});
+                QJsonObject resp;
+                resp["login"]    = QString::fromStdString(p->login);
+                resp["name"]     = QString::fromStdString(p->name);
+                resp["roles"]    = roles;
+                resp["tenantId"] = QString::fromStdString(p->tenantId);
+                return jsonResp(resp);
             });
 }
 

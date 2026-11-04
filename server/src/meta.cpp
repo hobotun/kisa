@@ -83,13 +83,13 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
     s.route(list, QHttpServerRequest::Method::Get,
             [&app, coll](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = requireAdmin(db, req, deny);
                 if (!p) return deny;
                 try {
                     b::document filter;
-                    filter.append(kvp("tenantId", bsoncxx::oid{p->tenantId}));
+                    filter.append(kvp("tenantId", p->tenantOid));
                     const QString st = QUrlQuery(req.url()).queryItemValue("status");
                     if (!st.isEmpty())
                         filter.append(kvp("status", st.toStdString()));
@@ -99,7 +99,9 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
                     QJsonArray items;
                     for (const auto &d : db[coll].find(filter.extract(), opts))
                         items.append(docToJson(d));
-                    return jsonResp({{"items", items}});
+                    QJsonObject resp;
+                    resp["items"] = items;
+                    return jsonResp(resp);
                 } catch (...) {
                     return errResp("internal", "list failed",
                                    QHttpServerResponse::StatusCode::InternalServerError);
@@ -109,7 +111,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
     s.route(list, QHttpServerRequest::Method::Post,
             [&app, coll](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = requireAdmin(db, req, deny);
                 if (!p) return deny;
@@ -120,7 +122,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
                                    QHttpServerResponse::StatusCode::BadRequest);
                 try {
                     b::document d;
-                    d.append(kvp("tenantId", bsoncxx::oid{p->tenantId}));
+                    d.append(kvp("tenantId", p->tenantOid));
                     d.append(kvp("key",     body.value("key").toString().toStdString()));
                     d.append(kvp("version", (int32_t)1));
                     d.append(kvp("status",  "draft"));
@@ -129,7 +131,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
                                           "slaByPriority", "instruction"})
                         if (body.contains(f))
                             d.append(kvp(std::string(f), jsonToBson(body.value(f))));
-                    d.append(kvp("createdBy", bsoncxx::oid{p->userId}));
+                    d.append(kvp("createdBy", p->userOid));
                     d.append(kvp("createdAt", bsoncxx::types::b_date(Clock::now())));
                     auto r = db[coll].insert_one(d.extract());
                     auto got = db[coll].find_one(b::make_document(
@@ -152,7 +154,7 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
     s.route(one, QHttpServerRequest::Method::Get,
             [&app, coll](const QString &key, const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = requireAdmin(db, req, deny);
                 if (!p) return deny;
@@ -161,13 +163,15 @@ void registerTemplateCrud(QHttpServer &s, App &app, const char *coll, const char
                     opts.sort(b::make_document(kvp("version", 1)));
                     QJsonArray items;
                     for (const auto &d : db[coll].find(
-                             b::make_document(kvp("tenantId", bsoncxx::oid{p->tenantId}),
+                             b::make_document(kvp("tenantId", p->tenantOid),
                                               kvp("key", key.toStdString())), opts))
                         items.append(docToJson(d));
                     if (items.isEmpty())
                         return errResp("not_found", "no such template",
                                        QHttpServerResponse::StatusCode::NotFound);
-                    return jsonResp({{"items", items}});
+                    QJsonObject resp;
+                    resp["items"] = items;
+                    return jsonResp(resp);
                 } catch (...) {
                     return errResp("internal", "get failed",
                                    QHttpServerResponse::StatusCode::InternalServerError);
@@ -191,14 +195,14 @@ void registerMeta(QHttpServer &s, App &app) {
                 [&app, collName](const QString &key, const QString &ver,
                                  const QHttpServerRequest &req) {
                     auto entry = app.acquire();
-                    auto db = (*entry)["kisa"];
+                    auto db = (*entry)[std::string("kisa")];
                     QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                     auto p = requireAdmin(db, req, deny);
                     if (!p) return deny;
                     try {
                         auto r = db[collName].update_one(
                             b::make_document(
-                                kvp("tenantId", bsoncxx::oid{p->tenantId}),
+                                kvp("tenantId", p->tenantOid),
                                 kvp("key",      key.toStdString()),
                                 kvp("version",  (int32_t)ver.toInt())),
                             b::make_document(kvp("$set", b::make_document(
@@ -206,7 +210,9 @@ void registerMeta(QHttpServer &s, App &app) {
                         if (r->modified_count() == 0)
                             return errResp("not_found", "no such version",
                                            QHttpServerResponse::StatusCode::NotFound);
-                        return jsonResp({{"ok", true}});
+                        QJsonObject resp;
+                        resp["ok"] = true;
+                        return jsonResp(resp);
                     } catch (...) {
                         return errResp("internal", "publish failed",
                                        QHttpServerResponse::StatusCode::InternalServerError);
@@ -217,29 +223,33 @@ void registerMeta(QHttpServer &s, App &app) {
     s.route("/api/v1/admin/roles", QHttpServerRequest::Method::Get,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = requireAdmin(db, req, deny);
                 if (!p) return deny;
                 QJsonArray items;
                 for (const auto &d : db["roles"].find(
-                         b::make_document(kvp("tenantId", bsoncxx::oid{p->tenantId}))))
+                         b::make_document(kvp("tenantId", p->tenantOid))))
                     items.append(docToJson(d));
-                return jsonResp({{"items", items}});
+                QJsonObject resp;
+                resp["items"] = items;
+                return jsonResp(resp);
             });
 
     s.route("/api/v1/admin/branches", QHttpServerRequest::Method::Get,
             [&app](const QHttpServerRequest &req) {
                 auto entry = app.acquire();
-                auto db = (*entry)["kisa"];
+                auto db = (*entry)[std::string("kisa")];
                 QHttpServerResponse deny(QHttpServerResponse::StatusCode::Unauthorized);
                 auto p = requireAdmin(db, req, deny);
                 if (!p) return deny;
                 QJsonArray items;
                 for (const auto &d : db["branches"].find(
-                         b::make_document(kvp("tenantId", bsoncxx::oid{p->tenantId}))))
+                         b::make_document(kvp("tenantId", p->tenantOid))))
                     items.append(docToJson(d));
-                return jsonResp({{"items", items}});
+                QJsonObject resp;
+                resp["items"] = items;
+                return jsonResp(resp);
             });
 }
 
