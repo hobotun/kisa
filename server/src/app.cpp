@@ -179,7 +179,7 @@ void App::seed() {
   }
   // Дефолты для всех тенантов (идемпотентно): базовые роли + service_request v1.
   for (const auto &t : tenants.find({}))
-    ensureTenantDefaults(*this, t.view()["_id"].get_oid().value);
+    ensureTenantDefaults(*this, t["_id"].get_oid().value);
 }
 
 // ---------- tenant / principal ----------
