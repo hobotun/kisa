@@ -17,6 +17,7 @@ add_executable(kisa-server
   src/app.cpp
   src/auth.cpp
   src/meta.cpp
+  src/engine.cpp
 )
 target_include_directories(kisa-server PRIVATE src)
 target_link_libraries(kisa-server PRIVATE

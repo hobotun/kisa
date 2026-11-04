@@ -20,6 +20,7 @@ services:
       retries: 5
 
   server:
+    image: ghcr.io/hobotun/kisa-server:latest
     build: ./server
     restart: unless-stopped
     environment:
@@ -38,6 +39,7 @@ services:
         condition: service_healthy
 
   web:
+    image: ghcr.io/hobotun/kisa-web:latest
     build: ./web
     restart: unless-stopped
     # Единственная точка входа: отдай ее в Nginx Proxy Manager / Traefik как

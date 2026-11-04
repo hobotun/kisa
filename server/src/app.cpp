@@ -1,7 +1,7 @@
 #include "app.hpp"
+#include "engine.hpp"
 
-#include <QCoreApplication>
-#include <QCryptographicHash>
+#include <QCoreApplication>#include <QCryptographicHash>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -137,40 +137,49 @@ void App::ensureIndexes() {
 
 void App::seed() {
   auto tenants = db["tenants"];
-  if (tenants.count_documents({}) > 0)
-    return; // сидируем только пустую базу
-  const QByteArray slug =
-      qgetenv("SEED_TENANT_SLUG").isEmpty() ? QByteArray("demo") : qgetenv("SEED_TENANT_SLUG");
-  const QByteArray login =
-      qgetenv("SEED_ADMIN_LOGIN").isEmpty() ? QByteArray("admin") : qgetenv("SEED_ADMIN_LOGIN");
-  const QByteArray pass = qgetenv("SEED_ADMIN_PASSWORD");
-  if (pass.isEmpty()) {
-    qWarning("seed skipped: set SEED_ADMIN_PASSWORD to create first tenant+admin");
-    return;
-  }
-  const auto now = Clock::now();
-  auto t = tenants.insert_one(
-      b::make_document(kvp("slug", std::string(slug.constData())), kvp("name", std::string(slug.constData())),
-                       kvp("status", "active"), kvp("createdAt", bsoncxx::types::b_date(now))));
-  const bsoncxx::oid tid = t->inserted_id().get_oid().value;
+  if (tenants.count_documents({}) == 0) {
+    const QByteArray slug = qgetenv("SEED_TENANT_SLUG").isEmpty()
+                                ? QByteArray("demo")
+                                : qgetenv("SEED_TENANT_SLUG");
+    const QByteArray login = qgetenv("SEED_ADMIN_LOGIN").isEmpty()
+                                 ? QByteArray("admin")
+                                 : qgetenv("SEED_ADMIN_LOGIN");
+    const QByteArray pass = qgetenv("SEED_ADMIN_PASSWORD");
+    if (pass.isEmpty()) {
+      qWarning("seed skipped: set SEED_ADMIN_PASSWORD to create first tenant+admin");
+    } else {
+      const auto now = Clock::now();
+      auto t = tenants.insert_one(b::make_document(
+          kvp("slug", std::string(slug.constData())),
+          kvp("name", std::string(slug.constData())), kvp("status", "active"),
+          kvp("createdAt", bsoncxx::types::b_date(now))));
+      const bsoncxx::oid tid = t->inserted_id().get_oid().value;
 
-  auto roles = db["roles"];
-  roles.insert_one(b::make_document(
-      kvp("tenantId", tid), kvp("roleKey", "tenant_admin"), kvp("title", "Администратор"),
-      kvp("canAdminUsers", true), kvp("canAdminTemplates", true)));
+      auto roles = db["roles"];
+      roles.insert_one(b::make_document(
+          kvp("tenantId", tid), kvp("roleKey", "tenant_admin"),
+          kvp("title", "Администратор"), kvp("canAdminUsers", true),
+          kvp("canAdminTemplates", true)));
 
-  const QString phc = argon2Hash(QString::fromUtf8(pass));
-  if (phc.isEmpty()) {
-    qWarning("seed failed: argon2 error");
-    return;
+      const QString phc = argon2Hash(QString::fromUtf8(pass));
+      if (phc.isEmpty()) {
+        qWarning("seed failed: argon2 error");
+      } else {
+        auto users = db["users"];
+        users.insert_one(b::make_document(
+            kvp("tenantId", tid), kvp("login", std::string(login.constData())),
+            kvp("passwordHash", std::string(phc.toLatin1().constData())),
+            kvp("name", "Administrator"),
+            kvp("roles", b::make_array("tenant_admin")), kvp("status", "active"),
+            kvp("createdAt", bsoncxx::types::b_date(now))));
+        qInfo("seeded tenant '%s' with admin '%s'", slug.constData(),
+              login.constData());
+      }
+    }
   }
-  auto users = db["users"];
-  users.insert_one(b::make_document(
-      kvp("tenantId", tid), kvp("login", std::string(login.constData())),
-      kvp("passwordHash", std::string(phc.toLatin1().constData())),
-      kvp("name", "Administrator"), kvp("roles", b::make_array("tenant_admin")),
-      kvp("status", "active"), kvp("createdAt", bsoncxx::types::b_date(now))));
-  qInfo("seeded tenant '%s' with admin '%s'", slug.constData(), login.constData());
+  // Дефолты для всех тенантов (идемпотентно): базовые роли + service_request v1.
+  for (const auto &t : tenants.find({}))
+    ensureTenantDefaults(*this, t.view()["_id"].get_oid().value);
 }
 
 // ---------- tenant / principal ----------
