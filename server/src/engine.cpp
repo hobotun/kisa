@@ -8,6 +8,7 @@
 #include <bsoncxx/builder/basic/array.hpp>
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/builder/basic/kvp.hpp>
+#include <mongocxx/client.hpp>
 #include <mongocxx/options/find.hpp>
 #include <mongocxx/options/find_one_and_update.hpp>
 
@@ -401,7 +402,7 @@ void registerEngine(QHttpServer &s, App &app) {
                     return errResp("bad_request", "templateKey required",
                                    QHttpServerResponse::StatusCode::BadRequest);
                 try {
-                    const bsoncxx::oid tid{p->tenantId};
+                    const bsoncxx::oid& tid = p->tenantOid;
                     auto tmpl = loadFlow(db, tid, tkey);
                     if (!tmpl)
                         return errResp("not_found", "no published template",
@@ -473,8 +474,8 @@ void registerEngine(QHttpServer &s, App &app) {
                 auto p = needAuth(db, req, deny);
                 if (!p) return deny;
                 try {
-                    const bsoncxx::oid tid{p->tenantId};
-                    const bsoncxx::oid me{p->userId};
+                    const bsoncxx::oid& tid = p->tenantOid;
+                    const bsoncxx::oid& me  = p->userOid;
                     b::document filter;
                     filter.append(kvp("tenantId", tid));
                     const QUrlQuery q(req.url());
@@ -511,7 +512,7 @@ void registerEngine(QHttpServer &s, App &app) {
                                      !term);
                         items.append(o);
                     }
-                    return jsonResp({{"items", items}});
+                    QJsonObject r; r["items"] = items; return jsonResp(r);
                 } catch (...) {
                     return errResp("internal", "list failed",
                                    QHttpServerResponse::StatusCode::InternalServerError);
@@ -652,7 +653,7 @@ void registerEngine(QHttpServer &s, App &app) {
                     if (!parseOid(id, rid))
                         return errResp("bad_request", "bad id",
                                        QHttpServerResponse::StatusCode::BadRequest);
-                    const bsoncxx::oid tid{p->tenantId};
+                    const bsoncxx::oid& tid = p->tenantOid;
                     auto got = db["requests"].find_one(
                         b::make_document(kvp("_id", rid), kvp("tenantId", tid)));
                     if (!got)
@@ -662,7 +663,8 @@ void registerEngine(QHttpServer &s, App &app) {
                         b::make_document(kvp("_id", rid)),
                         b::make_document(kvp("$set", b::make_document(
                             kvp("approvalMode", mode.toStdString())))));
-                    QJsonObject resp{{"approvalMode", mode}};
+                    QJsonObject resp;
+                    resp["approvalMode"] = mode;
                     if (mode == "guest") {
                         auto tmpl = loadFlow(db, tid, strField(got->view(), "templateKey"));
                         b::array scope;
@@ -801,12 +803,12 @@ void registerEngine(QHttpServer &s, App &app) {
                         if (!done) fresh.append(a);
                     }
                     const auto rv = got->view();
-                    QJsonObject card{
-                        {"title", QString::fromStdString(
-                             strField(rv["fields"].get_document().value, "title"))},
-                        {"state", QString::fromStdString(strField(rv, "state"))},
-                        {"stateTitle", stateTitle(tmpl->view(), strField(rv, "state"))},
-                        {"allowedActions", fresh}};
+                    QJsonObject card;
+                    card["title"]          = QString::fromStdString(
+                        strField(rv["fields"].get_document().value, "title"));
+                    card["state"]          = QString::fromStdString(strField(rv, "state"));
+                    card["stateTitle"]     = stateTitle(tmpl->view(), strField(rv, "state"));
+                    card["allowedActions"] = fresh;
                     return jsonResp(card);
                 } catch (...) {
                     return errResp("internal", "guest card failed",
@@ -861,7 +863,10 @@ void registerEngine(QHttpServer &s, App &app) {
                         b::make_document(kvp("_id", tv["_id"].get_oid().value)),
                         b::make_document(kvp("$push", b::make_document(
                             kvp("usedActions", action.toStdString())))));
-                    return jsonResp({{"ok", true}, {"state", QString::fromStdString(r.newState)}});
+                    QJsonObject r2;
+                    r2["ok"]    = true;
+                    r2["state"] = QString::fromStdString(r.newState);
+                    return jsonResp(r2);
                 } catch (...) {
                     return errResp("internal", "guest transition failed",
                                    QHttpServerResponse::StatusCode::InternalServerError);
@@ -882,7 +887,7 @@ void registerEngine(QHttpServer &s, App &app) {
                     return errResp("bad_request", "invalid JSON",
                                    QHttpServerResponse::StatusCode::BadRequest);
                 try {
-                    const bsoncxx::oid tid{p->tenantId};
+                    const bsoncxx::oid& tid = p->tenantOid;
                     const std::string tkey = body.value("templateKey").toString().toStdString();
                     mongocxx::options::find fopts;
                     fopts.sort(b::make_document(kvp("version", -1)));
@@ -964,7 +969,7 @@ void registerEngine(QHttpServer &s, App &app) {
                     QJsonArray items;
                     for (const auto &d : db["documents"].find(filter.extract(), opts))
                         items.append(docToJson(d));
-                    return jsonResp({{"items", items}});
+                    QJsonObject r; r["items"] = items; return jsonResp(r);
                 } catch (...) {
                     return errResp("internal", "list failed",
                                    QHttpServerResponse::StatusCode::InternalServerError);
