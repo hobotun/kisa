@@ -12,6 +12,7 @@
 
 #include <bsoncxx/oid.hpp>
 #include <mongocxx/database.hpp>
+#include <mongocxx/client.hpp>
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
 
